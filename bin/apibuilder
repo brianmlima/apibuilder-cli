@@ -289,6 +289,51 @@ if command == "list"
     exit(1)
   end
 
+  ######################################################################################################################
+  ######################################################################################################################
+elsif command == "breaking"
+  org = ARGV.shift.to_s.strip
+  application = ARGV.shift.to_s.strip
+  version = ARGV.shift.to_s.strip
+  compareToFile = ARGV.shift.to_s.strip
+
+  #############################################
+  # check args and return errors
+  if org.empty? || application.empty? || version.empty? || compareToFile.empty?
+    puts "org, application, version, and compareToFile are required"
+    exit(1)
+  end
+  compareToFileContents = File.read(compareToFile)
+  if compareToFileContents.empty?
+    puts "  ERROR: the api.json file at #{compareToFile} is empty"
+    exit(1)
+  end
+  #############################################
+
+  #############################################
+  # Get the remote api.json
+  begin
+    app = client.versions.get_by_application_key_and_version(org, application, version)
+    if app.original.data.empty?
+      $stderr.puts "  ERROR: the breaking command only supports api.json style originals"
+      exit(1)
+    end
+  rescue Exception => e
+    handle_server_error(e)
+  end
+  #############################################
+
+  #############################################
+  # Cant get the ruby objects to parse the raw
+  # json so we have to do this with hashes
+  remoteData = JSON.parse(app.original.data)
+  localData = JSON.parse(compareToFileContents)
+  ::ApibuilderCli::SpecTool.compare(remoteData, localData)
+  #############################################
+
+  ######################################################################################################################
+  ######################################################################################################################
+
 elsif command == "download"
   org = ARGV.shift.to_s.strip
   application = ARGV.shift.to_s.strip
