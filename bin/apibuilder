@@ -328,7 +328,22 @@ elsif command == "breaking"
   # json so we have to do this with hashes
   remoteData = JSON.parse(app.original.data)
   localData = JSON.parse(compareToFileContents)
-  ::ApibuilderCli::SpecTool.compare(remoteData, localData)
+
+  results = ::ApibuilderCli::SpecTool.compare(remoteData, localData)
+
+  #############################################
+  # Handle output nothing and exist success
+  # or output breaking changes
+  if (!results.empty?)
+    puts results.to_json
+    exit(1)
+  else
+    exit(0)
+  end
+  #############################################
+
+
+
   #############################################
 
   ######################################################################################################################

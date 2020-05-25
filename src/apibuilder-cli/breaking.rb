@@ -1,33 +1,28 @@
 require 'ostruct'
+require 'json'
 
 module ApibuilderCli
 
 
   class SpecHash
-    def SpecHash.nameKey()
-      "name"
-    end
+
+    NAME_KEY = "name"
 
     def SpecHash.name(hash)
-      hash["name"]
+      hash[SpecHash::NAME_KEY]
     end
 
-    def SpecHash.modelsKey()
-      "models"
-    end
+    MODELS_KEY = "models"
 
     def SpecHash.models(hash)
-      hash["models"]
+      hash[SpecHash::MODELS_KEY]
     end
 
-    def SpecHash.enumsKey()
-      "enums"
-    end
+    ENUMS_KEY = "enums"
 
     def SpecHash.enums(hash)
-      hash["enums"]
+      hash[SpecHash::ENUMS_KEY]
     end
-
 
     RESOURCES_KEY = "resources"
 
@@ -47,37 +42,24 @@ module ApibuilderCli
       hash[SpecHash::OPERATIONS_KEY]
     end
 
-
-    def SpecHash.fieldsKey()
-      "fields"
-    end
+    FIELDS_KEY = "fields"
 
     def SpecHash.fields(hash)
-      hash["fields"]
+      hash[SpecHash::FIELDS_KEY]
     end
 
-    def SpecHash.requiredKey()
-      "required"
-    end
+    REQUIRED_KEY = "required"
 
     def SpecHash.required(hash)
-      if (hash.has_key?(requiredKey)) then
-        hash[requiredKey]
+      if (hash.has_key?(SpecHash::REQUIRED_KEY)) then
+        hash[SpecHash::REQUIRED_KEY]
       else
         true
       end
     end
 
-    def SpecHash.valuesKey()
-      "values"
-    end
-
     def SpecHash.values(hash)
       hash["values"]
-    end
-
-    def SpecHash.typeKey()
-      "type"
     end
 
     def SpecHash.type(hash)
@@ -155,38 +137,54 @@ module ApibuilderCli
       breakingChanges = Array.new
       brokenModels = Array.new
 
+      application = SpecHash.name(remoteData)
+
+      breaking = {:isBreaking => true, :isBroken => false}
+      broken = {:isBreaking => false, :isBroken => true}
+
       #############################################
-      # Check enumerations
+      # BEGIN Check enumerations
       SpecHash.enums(remoteData).each_pair {
           |remoteEnumName, remoteEnum|
         localEnum = findEnumByName(localData, remoteEnumName)
         if (localEnum == nil)
-          brokenModels.push(remoteModelName)
-          breakingChanges.push("enums.#{remoteEnumName} does not exist locally")
+          brokenModels.push(remoteEnumName)
+          breakingChanges.push(
+              {
+                  :type => "ENUM_REMOVED",
+                  :location => {:application => application, :enum => remoteEnumName},
+                  :severity => breaking,
+                  :message => "enums.#{remoteEnumName} does not exist locally"
+              })
           next
         end
-
         SpecHash.values(remoteEnum).each { |remoteEnumValue|
           localEnumValue = findEnumEntryByValue(localEnum, remoteEnumValue)
-
           if (localEnumValue == nil)
-            brokenModels.push(remoteEnum)
-            breakingChanges.push("#{remoteEnumName}.values[].name.#{SpecHash.name(remoteEnumValue)} does not exist locally")
+            brokenModels.push(remoteEnumName)
+            breakingChanges.push(
+                {
+                    :type => "ENUM_VALUE_REMOVED",
+                    :location => {:application => application, :enum => remoteEnumName, :name => SpecHash.name(remoteEnumValue)},
+                    :severity => breaking,
+                    :message => "enums.#{remoteEnumName}.values[].name.#{SpecHash.name(remoteEnumValue)} does not exist locally"
+                })
             next
           end
         }
       }
+      # END Check enumerations
       #############################################
 
       #############################################
-      # Iterate over the remote models
+      # BEGIN check models
       ::ApibuilderCli::SpecHash.models(remoteData).each_pair {
           |remoteModelName, remoteModel|
         #puts "#{remoteModleName} #{localData[modelsKey].key?(remoteModleName)}"
 
         localModel = ::ApibuilderCli::SpecHash.models(localData)[remoteModelName]
         remoteFields = ::ApibuilderCli::SpecHash.fields(remoteModel)
-        localFields = ::ApibuilderCli::SpecHash.fields(localModel)
+        # localFields = ::ApibuilderCli::SpecHash.fields(localModel)
 
         #############################################
         # Iterate over the remote model fields
@@ -197,7 +195,13 @@ module ApibuilderCli
           #Break if remote required field does not exist locally
           if (localField == nil)
             brokenModels.push(remoteModelName)
-            breakingChanges.push("#{remoteModelName}.fields.#{remoteFieldName} does not exist locally")
+            breakingChanges.push(
+                {
+                    :type => "FIELD_REMOVED",
+                    :location => {:application => application, :model => remoteModelName, :field => remoteFieldName},
+                    :severity => breaking,
+                    :message => "models.#{remoteModelName}.fields.#{remoteFieldName} does not exist locally"
+                })
             next
           end
           # field exist on both sides, do comparison
@@ -206,25 +210,47 @@ module ApibuilderCli
           #  Break if field type has changed
           if (remoteFieldType != localFieldType)
             brokenModels.push(remoteModelName)
-            breakingChanges.push("#{remoteModelName}.fields.#{remoteFieldName} field type has changed from #{remoteFieldType} to  #{localFieldType}")
+            breakingChanges.push(
+                {
+                    :type => "FIELD_TYPE_CHANGE",
+                    :location => {:application => application, :model => remoteModelName, :field => remoteFieldName},
+                    :severity => breaking,
+                    :message => "field type has changed from #{remoteFieldType} to #{localFieldType}"
+                })
           end
           # Break if required has changed
           isRemoteFieldRequired = ::ApibuilderCli::SpecHash.required(remoteField)
           isLocalFieldRequired = ::ApibuilderCli::SpecHash.required(localField)
           if (isRemoteFieldRequired != isLocalFieldRequired)
             brokenModels.push(remoteModelName)
-            breakingChanges.push("#{remoteModelName}.fields.#{remoteFieldName} field required has changed from #{isRemoteFieldRequired} to #{isLocalFieldRequired}")
+            breakingChanges.push(
+                {
+                    :type => "FIELD_REQUIRED_CHANGE",
+                    :location => {:application => application, :model => remoteModelName, :field => remoteFieldName},
+                    :severity => breaking,
+                    :message => "#{remoteModelName}.fields.#{remoteFieldName} field required has changed from #{isRemoteFieldRequired} to #{isLocalFieldRequired}"
+                })
           end
         }
       }
+      # END check models
+      #############################################
 
       remoteResources = SpecHash.resources(remoteData)
       localResources = SpecHash.resources(localData)
 
+      #############################################
+      # BEGIN check resources
       remoteResources.each_pair {
           |remoteResourceName, remoteResource|
         if (!localResources.key?(remoteResourceName))
-          breakingChanges.push("resources.#{remoteResourceName} has been removed")
+          breakingChanges.push(
+              {
+                  :type => "RESOURCE_REMOVED",
+                  :location => {:application => application, :resource => remoteResourceName},
+                  :severity => breaking,
+                  :message => "resources.#{remoteResourceName} has been removed"
+              })
           next
         end
         localResource = localResources.fetch(remoteResourceName)
@@ -232,14 +258,19 @@ module ApibuilderCli
         remoteResourcePath = SpecHash.path(remoteResource)
         localResourcePath = SpecHash.path(localResource)
 
-
         hasResourcePathChanged = !(remoteResourcePath == localResourcePath)
         if (hasResourcePathChanged)
-          breakingChanges.push("resources.#{remoteResourceName} path has changed from "\
-                               "#{ (remoteResourcePath == nil) ? "Not Defined (defaults to \"#{remoteResourceName}\")" : remoteResourcePath } "\
-                               "to #{ (localResourcePath == nil) ? "Not Defined (defaults to \"#{remoteResourceName}\")" : localResourcePath }")
+          remotePath = (remoteResourcePath == nil) ? "Not Defined (defaults to \"#{remoteResourceName}\")" : remoteResourcePath
+          localPath = (localResourcePath == nil) ? "Not Defined (defaults to \"#{remoteResourceName}\")" : localResourcePath
+          change = {
+              :type => "RESOURCE_PATH_CHANGE",
+              :location => {:application => application, :resource => remoteResourceName, :path => remotePath},
+              :severity => breaking,
+              :message => "resources.#{remoteResourceName} path has changed from "\
+                               "#{remotePath} to #{localPath}. This will cause any contained operations to break."
+          }
+          breakingChanges.push(change)
         end
-
 
         SpecHash.operations(remoteResource).each {
             |remoteOperation|
@@ -247,29 +278,30 @@ module ApibuilderCli
           remotePath = SpecHash.path(remoteOperation)
           localOperation = SpecTool.findLocalOperation(remoteOperation, localResource)
           if (localOperation == nil)
-            breakingChanges.push("resources.#{remoteResourceName}.operation{ method: #{remoteMethod} : path: #{remotePath}  }  has been removed")
+            breakingChanges.push(
+                {
+                    :type => "OPERATION_REMOVED",
+                    :location => {:application => application, :resource => remoteResourceName, :operation => {:metthod => remoteMethod, :path => remotePath}},
+                    :severity => breaking,
+                    :message => "resources.#{remoteResourceName}.operation{ method: #{remoteMethod} : path: #{remotePath} } has been removed"
+                })
             next
           end
-          if(hasResourcePathChanged)
-            breakingChanges.push("resources.#{remoteResourceName}.operation{ method: #{remoteMethod} : path: #{remotePath}  }  relative path has changed at the #{remoteResourceName} resource path")
+          if (hasResourcePathChanged)
+            breakingChanges.push(
+                {
+                    :type => "RESOURCE_PATH_CHANGE_CASCADE",
+                    :location => {:application => application, :resource => remoteResourceName, :operation => {:metthod => remoteMethod, :path => remotePath}},
+                    :severity => broken,
+                    :message => "relative path has changed at the #{remoteResourceName} resource path"
+                })
           end
-
-
         }
       }
-
-
-      #############################################
-      # Handle output nothing and exist success
-      # or output breaking changes
-      if (!breakingChanges.empty?)
-        puts breakingChanges
-        exit(1)
-      else
-        exit(0)
-      end
+      # END check resources
       #############################################
 
+      return breakingChanges
     end
   end
 end
