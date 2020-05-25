@@ -1,3 +1,5 @@
+require 'ostruct'
+
 module ApibuilderCli
 
 
@@ -25,6 +27,26 @@ module ApibuilderCli
     def SpecHash.enums(hash)
       hash["enums"]
     end
+
+
+    RESOURCES_KEY = "resources"
+
+    def SpecHash.resources(hash)
+      hash[SpecHash::RESOURCES_KEY]
+    end
+
+    PATH_KEY = "path"
+
+    def SpecHash.path(hash)
+      hash[SpecHash::PATH_KEY]
+    end
+
+    OPERATIONS_KEY = "operations"
+
+    def SpecHash.operations(hash)
+      hash[SpecHash::OPERATIONS_KEY]
+    end
+
 
     def SpecHash.fieldsKey()
       "fields"
@@ -65,6 +87,24 @@ module ApibuilderCli
 
   class SpecTool
 
+    class ModelUtil
+
+      PRIMITIVES = ["boolean", "date-iso8601", "date-time-iso8601", "decimal", "double", "integer", "json", "long", "object", "string", "unit"]
+
+      def ModelUtil.isModel(aType)
+        if (ModelUtil::PRIMITIVES.include?("aType"))
+          # Is a primitive
+          return false
+        end
+        if (aType[0] == "[")
+
+          return false
+        end
+        return true
+      end
+    end
+
+
     # finds a field in a model hash by field name
     def SpecTool.findFieldByName(model, fieldName)
       SpecHash.fields(model).each do |field|
@@ -93,6 +133,19 @@ module ApibuilderCli
           return enumEntry
         end
       }
+      return nil
+    end
+
+    def SpecTool.findLocalOperation(remoteOperation, localResource)
+      remoteMethod = remoteOperation["method"]
+      remotePath = SpecHash.path(remoteOperation)
+      SpecHash.operations(localResource).each do |localOperation|
+        localMethod = localOperation["method"]
+        localPath = SpecHash.path(localOperation)
+        if (remoteMethod == localMethod && remotePath == localPath)
+          return localOperation
+        end
+      end
       return nil
     end
 
@@ -164,6 +217,47 @@ module ApibuilderCli
           end
         }
       }
+
+      remoteResources = SpecHash.resources(remoteData)
+      localResources = SpecHash.resources(localData)
+
+      remoteResources.each_pair {
+          |remoteResourceName, remoteResource|
+        if (!localResources.key?(remoteResourceName))
+          breakingChanges.push("resources.#{remoteResourceName} has been removed")
+          next
+        end
+        localResource = localResources.fetch(remoteResourceName)
+
+        remoteResourcePath = SpecHash.path(remoteResource)
+        localResourcePath = SpecHash.path(localResource)
+
+
+        hasResourcePathChanged = !(remoteResourcePath == localResourcePath)
+        if (hasResourcePathChanged)
+          breakingChanges.push("resources.#{remoteResourceName} path has changed from "\
+                               "#{ (remoteResourcePath == nil) ? "Not Defined (defaults to \"#{remoteResourceName}\")" : remoteResourcePath } "\
+                               "to #{ (localResourcePath == nil) ? "Not Defined (defaults to \"#{remoteResourceName}\")" : localResourcePath }")
+        end
+
+
+        SpecHash.operations(remoteResource).each {
+            |remoteOperation|
+          remoteMethod = remoteOperation["method"]
+          remotePath = SpecHash.path(remoteOperation)
+          localOperation = SpecTool.findLocalOperation(remoteOperation, localResource)
+          if (localOperation == nil)
+            breakingChanges.push("resources.#{remoteResourceName}.operation{ method: #{remoteMethod} : path: #{remotePath}  }  has been removed")
+            next
+          end
+          if(hasResourcePathChanged)
+            breakingChanges.push("resources.#{remoteResourceName}.operation{ method: #{remoteMethod} : path: #{remotePath}  }  relative path has changed at the #{remoteResourceName} resource path")
+          end
+
+
+        }
+      }
+
 
       #############################################
       # Handle output nothing and exist success
